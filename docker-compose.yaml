@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    image: easycamping-backend:1.0.0
+    container_name: easycamp-backend
+    ports:
+      - "8080:8080"
+    networks:
+      - easycamp-network
+    volumes:
+      - ./static_uploads/img/campArea:/usr/local/tomcat/webapps/ROOT/static/uploads/img/campArea
+      - ./uploads/img/campArea:/app/uploads/campArea
+
+  frontend:
+    image: easycamp-frontend:1.0.0
+    container_name: easycamp-frontend
+    ports:
+      - "6173:6173"
+    environment:
+      - VITE_API_URL=http://backend:8080
+    networks:
+      - easycamp-network
+    depends_on:
+      - backend
+
+networks:
+  easycamp-network:
+    driver: bridge
