@@ -1,0 +1,258 @@
+ package com.example.back.service;
+ 
++import java.nio.file.Path;
+ import java.io.File;
+ import java.math.BigDecimal;
+ import java.nio.file.Paths;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ import java.util.Optional;
+ 
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ import org.springframework.web.multipart.MultipartFile;
+ 
+ import com.example.back.config.FileUploadProperties;
+ import com.example.back.domain.CampAreaBean;
+ import com.example.back.domain.CampSiteBean;
+ import com.example.back.domain.CampSpotBean;
+ import com.example.back.dto.CampSiteRequest;
+ import com.example.back.dto.CampSiteUpdateRequest;
+ import com.example.back.dto.CampSpotRequest;
+ import com.example.back.repository.CampAreaRepository;
+ import com.example.back.repository.CampSiteRepository;
+ import com.example.back.repository.CampSpotRepository;
+ 
+ import io.jsonwebtoken.io.IOException;
+ import jakarta.transaction.Transactional;
+ 
+ @Service
+ @Transactional
+ public class CampSiteService {
+     @Autowired
+     private CampAreaRepository campAreaRepo;
+     @Autowired
+     private CampSiteRepository campSiteRepo;
+     @Autowired
+     private CampSpotRepository campSpotRepo;
+     
+     @Autowired
+     private FileUploadProperties uploadProps;
+   
+     
+ 
+     
+     public List<CampSiteBean> findAll() {
+         return campSiteRepo.findAll();
+     }
+ 
+     public Optional<CampSiteBean> findById(Integer id) {
+         return campSiteRepo.findById(id);
+     }
+ 
+     public CampSiteBean save(CampSiteBean bean) {
+         return campSiteRepo.save(bean);
+     }
+ 
+     public void deleteById(Integer id) {
+     	campSiteRepo.deleteById(id);
+     }
+     
+     
+     private String defaultIfNullOrBlank(String value, String defaultValue) {
+         return (value == null || value.trim().isEmpty()) ? defaultValue : value;
+     }
+ 
+     public CampSiteBean createForUser(CampSiteRequest req, Integer userId) {
+     	CampAreaBean area = campAreaRepo.findById(req.getCampAreaId())
+     	        .filter(a -> a.getUser().getId().equals(userId))
+     	        .orElseThrow(() -> new RuntimeException("營主無權限建立此營地"));
+         CampSiteBean site = new CampSiteBean();
+         site.setCampArea(area);
+         site.setCampSiteName(defaultIfNullOrBlank(req.getCampSiteName(), "未命名營地"));
+         site.setDescription(defaultIfNullOrBlank(req.getDescription(), ""));
+         site.setSiteType(defaultIfNullOrBlank(req.getSiteType(), "一般"));
+         site.setMaxCapacity(req.getMaxCapacity() != null ? req.getMaxCapacity() : 0);
+         site.setRecommendedFor(defaultIfNullOrBlank(req.getRecommendedFor(), "-"));
+ 
+         return campSiteRepo.save(site);
+     }
+     
+     //同時新增營地與營位
+     public void createWithSpots(CampSiteRequest req, List<MultipartFile> images, Integer userId) throws IOException {
+         CampAreaBean area = campAreaRepo.findById(req.getCampAreaId())
+             .filter(a -> a.getUser().getId().equals(userId))
+             .orElseThrow(() -> new RuntimeException("營主無權限建立此營地"));
+ 
+         CampSiteBean site = new CampSiteBean();
+         site.setCampArea(area);
+         site.setCampSiteName(defaultIfBlank(req.getCampSiteName(), "未命名營地"));
+         site.setSiteType(defaultIfBlank(req.getSiteType(), "未知類型"));
+         site.setDescription(defaultIfBlank(req.getDescription(), ""));
+         site.setMaxCapacity(req.getMaxCapacity() != null ? req.getMaxCapacity() : 0);
+         site.setRecommendedFor(defaultIfBlank(req.getRecommendedFor(), ""));
+         site.setStatus(defaultIfBlank(req.getStatus(), "Available"));
+         site.setCreatedDate(LocalDateTime.now());
+         site.setUpdatedDate(LocalDateTime.now());
+ 
+         CampSiteBean savedSite = campSiteRepo.save(site);
+ 
+         if (req.getCampSpots() != null) {
+             for (int i = 0; i < req.getCampSpots().size(); i++) {
+                 CampSpotRequest spotReq = req.getCampSpots().get(i);
+ 
+                 CampSpotBean spot = new CampSpotBean();
+                 spot.setCampSite(savedSite);
+                 spot.setSpotName(defaultIfBlank(spotReq.getSpotName(), "未命名帳位"));
+                 spot.setSpotNumber("A" + (i + 1));
+                 spot.setAreaSize(defaultIfBlank(spotReq.getAreaSize(), ""));
+                 spot.setMaxTents(spotReq.getMaxTents() != null ? spotReq.getMaxTents() : 1);
+                 spot.setMaxPeople(spotReq.getMaxPeople() != null ? spotReq.getMaxPeople() : 4);
+                 spot.setPricePerNight(defaultIfNull(spotReq.getPricePerNight(), BigDecimal.ZERO));
+                 spot.setPriceWeekend(defaultIfNull(spotReq.getPriceWeekend(), BigDecimal.ZERO));
+                 spot.setPriceHoliday(defaultIfNull(spotReq.getPriceHoliday(), BigDecimal.ZERO));
+                 spot.setHasElectricity(Boolean.TRUE.equals(spotReq.getHasElectricity()));
+                 spot.setHasWater(Boolean.TRUE.equals(spotReq.getHasWater()));
+                 spot.setDescription(defaultIfBlank(spotReq.getDescription(), ""));
+ 
+ 
+                 // 處理圖片上傳（僅第一張或與 spot 對應）
+                 if (images != null && i < images.size()) {
+                     MultipartFile file = images.get(i);
+                     String filename = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+                     String toiletPath = Paths.get(new File("").getAbsolutePath(), uploadProps.getToilet()).toString();
+                     File dir = new File(toiletPath);
+                     if (!dir.exists()) dir.mkdirs();
+                     try {
+ 						file.transferTo(new File(dir, filename));
+ 					} catch (IllegalStateException e) {
+ 						// TODO Auto-generated catch block
+ 						e.printStackTrace();
+ 					} catch (java.io.IOException e) {
+ 						// TODO Auto-generated catch block
+ 						e.printStackTrace();
+ 					}
+                     System.out.println(filename);
+                     spot.setToiletImage("/static/uploads/img/toilet/" + filename);
+                 }
+ 
+                 campSpotRepo.save(spot);
+             }
+         }
+     }
+ 
+     
+     //同時更新營地跟營位
+     public CampSiteBean updateFromRequest(
+             Integer campSiteId,
+             CampSiteUpdateRequest request,
+             List<MultipartFile> images,
+             Integer currentUserId
+     ) throws IOException {
+ 
+     	
+         System.out.println("🔍 campSpotId from request: " + request.getCampSpots().get(0).getCampSpotId() + "campSiteId=  "+campSiteId);
+         CampSiteBean site = campSiteRepo.findById(campSiteId)
+             .orElseThrow(() -> new RuntimeException("找不到 CampSite"));
+ 
+         // 驗證營區擁有權
+         if (!site.getCampArea().getUser().getId().equals(currentUserId)) {
+             throw new RuntimeException("無權限修改此營位");
+         }
+ 
+         // 更新 CampSite 本體欄位
+         CampSiteRequest siteDto = request.getCampSite();
+         site.setCampSiteName(defaultIfBlank(siteDto.getCampSiteName(), "未命名營位"));
+         site.setSiteType(defaultIfBlank(siteDto.getSiteType(), "未知類型"));
+         site.setDescription(defaultIfBlank(siteDto.getDescription(), ""));
+         site.setRecommendedFor(defaultIfBlank(siteDto.getRecommendedFor(), ""));
+         site.setStatus(defaultIfBlank(siteDto.getStatus(), "active"));
+         site.setUpdatedDate(LocalDateTime.now());
+ 
+         // 更新 CampSpot
+         if (request.getCampSpots() != null) {
+             for (CampSpotRequest spotDto : request.getCampSpots()) {
+             	CampSpotBean spot = campSpotRepo.findById(spotDto.getCampSpotId())
+                     .orElseThrow(() -> new RuntimeException("找不到 CampSpot"));
+  
+ 
+                 if (!spot.getCampSite().getCampSiteId().equals(site.getCampSiteId())) {
+                     throw new RuntimeException("帳位不屬於此 CampSite");
+                 }
+ 
+                 // 處理圖片移除請求
+                 if ("REMOVE".equalsIgnoreCase(spotDto.getToiletImage())) {
+                     spot.setToiletImage(null);
+                 }
+ 
+                 // 更新一般欄位
+                 spot.setSpotNumber(defaultIfBlank(spotDto.getSpotNumber(), "N/A"));
+                 spot.setSpotName(defaultIfBlank(spotDto.getSpotName(), "未命名帳位"));
+                 spot.setDescription(defaultIfBlank(spotDto.getDescription(), ""));
+                 spot.setAreaSize(defaultIfBlank(spotDto.getAreaSize(), ""));
+                 spot.setMaxTents(spotDto.getMaxTents() != null ? spotDto.getMaxTents() : 1);
+                 spot.setMaxPeople(spotDto.getMaxPeople() != null ? spotDto.getMaxPeople() : 1);
+                 spot.setPricePerNight(defaultIfNull(spotDto.getPricePerNight(), BigDecimal.ZERO));
+                 spot.setPriceWeekend(defaultIfNull(spotDto.getPriceWeekend(), BigDecimal.ZERO));
+                 spot.setPriceHoliday(defaultIfNull(spotDto.getPriceHoliday(), BigDecimal.ZERO));
+                 spot.setHasElectricity(Boolean.TRUE.equals(spotDto.getHasElectricity()));
+                 spot.setHasWater(Boolean.TRUE.equals(spotDto.getHasWater()));
+             }
+         }
+ 
+         // 上傳圖片邏輯（對應第一個 CampSpot）
+         if (images != null && !images.isEmpty()
+             && request.getCampSpots() != null && !request.getCampSpots().isEmpty()) {
+ 
+             MultipartFile file = images.get(0);
+             String filename = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+ 
+             // 動態取得上傳路徑
+             String toiletPath = Paths.get(new File("").getAbsolutePath(), uploadProps.getToilet()).toString();
+             File dir = new File(toiletPath);
+             if (!dir.exists()) dir.mkdirs();
+ 
+-            File destFile = new File(dir, filename);
++            Path destPath = Paths.get(dir.getCanonicalPath(), filename).normalize();
++            if (!destPath.startsWith(dir.getCanonicalPath())) {
++                throw new IOException("Invalid file path");
++            }
++            File destFile = destPath.toFile();
+             try {
+ 				file.transferTo(destFile);
+ 			} catch (IllegalStateException e) {
+ 				// TODO Auto-generated catch block
+ 				e.printStackTrace();
+ 			} catch (java.io.IOException e) {
+ 				// TODO Auto-generated catch block
+ 				e.printStackTrace();
+ 			}
+ 
+ 
+             // 儲存圖片路徑到 CampSpot（對應第一個 spot）
+             CampSpotBean firstSpot = campSpotRepo.findById(request.getCampSpots().get(0).getCampSpotId())
+                 .orElseThrow(() -> new RuntimeException("找不到 CampSpot"));
+ 
+             firstSpot.setToiletImage("/static/uploads/img/toilet/" + filename);
+         }
+ 
+         return campSiteRepo.save(site);
+     }
+ 
+ 
+ 
+     private String defaultIfBlank(String val, String defaultVal) {
+         return (val == null || val.trim().isEmpty()) ? defaultVal : val;
+     }
+ 
+     private BigDecimal defaultIfNull(BigDecimal val, BigDecimal defaultVal) {
+         return val != null ? val : defaultVal;
+     }
+ 
+     public List<CampSiteBean> findByUserAndCampArea(Integer userId, Integer campAreaId) {
+         CampAreaBean area = campAreaRepo.findById(campAreaId)
+             .filter(a -> a.getUser().getId().equals(userId))
+             .orElseThrow(() -> new RuntimeException("無權限查看此營區"));
+         return campSiteRepo.findByCampArea_CampAreaId(campAreaId);
+     }
+ }
