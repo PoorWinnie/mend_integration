@@ -1,0 +1,522 @@
+ package com.example.back.service;
+ 
+ 
++import java.io.IOException;
+ import java.io.File;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+ import java.nio.file.StandardCopyOption;
+ import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
+ import java.util.stream.Collectors;
+ 
+ import org.json.JSONObject;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ import org.springframework.web.multipart.MultipartFile;
+ 
+ import com.example.back.config.FileUploadProperties;
+ import com.example.back.domain.CampAreaBean;
+ import com.example.back.domain.CampAreaImageBean;
+ import com.example.back.domain.CampAreaOffDayBean;
+ import com.example.back.domain.CampAreaOffWeekdayBean;
+ import com.example.back.domain.UserBean;
+ import com.example.back.dto.CampAreaRequest;
+ import com.example.back.dto.CampAreaSimpleDTO;
+ import com.example.back.repository.BathroomRepository;
+ import com.example.back.repository.CampAreaImageRepository;
+ import com.example.back.repository.CampAreaOffDayRepository;
+ import com.example.back.repository.CampAreaOffWeekdayRepository;
+ import com.example.back.repository.CampAreaRepository;
+ import com.example.back.repository.FacilityRepository;
+ import com.example.back.repository.FeatureTagRepository;
+ import com.example.back.repository.ParkingRepository;
+ import com.example.back.repository.PetRepository;
+ import com.example.back.repository.UserRepository;
+ import com.example.back.repository.WifiRepository;
+ 
+ import io.jsonwebtoken.io.IOException;
+ import jakarta.transaction.Transactional;
+ 
+ @Service
+ @Transactional
+ public class CampAreaService {
+ 
+ 	@Autowired
+ 	private CampAreaRepository campAreaRepo;
+ 	@Autowired
+ 	private FeatureTagRepository featureTagRepo;
+ 	@Autowired
+ 	private FacilityRepository facilityRepo;
+ 	@Autowired
+ 	private WifiRepository wifiRepo;
+ 	@Autowired
+ 	private BathroomRepository bathroomRepo;
+ 	@Autowired
+ 	private ParkingRepository parkingRepo;
+ 	@Autowired
+ 	private PetRepository petRepo;
+ 	@Autowired
+ 	private UserRepository userRepo;
+     @Autowired
+     private CampAreaImageRepository imageRepo;
+ 	
+     @Autowired
+     private FileUploadProperties uploadProps;
+     
+     @Autowired
+     private CampAreaOffWeekdayRepository offWeekdayRepo;
+ 
+     @Autowired
+     private CampAreaOffDayRepository offDayRepo;
+ 
+     
+ 
+ 
+ 	
+ 	public List<CampAreaBean> findByUserId(Integer userId) {
+ 	    return campAreaRepo.findByUserId(userId);
+ 	}
+ 
+ 	public List<CampAreaBean> findAll() {
+ 		return campAreaRepo.findAll();
+ 	}
+ 
+ 	public Optional<CampAreaBean> findById(Integer id) {
+ 		return campAreaRepo.findById(id);
+ 	}
+ 
+ 	public CampAreaBean save(CampAreaBean bean) {
+ 		return campAreaRepo.save(bean);
+ 	}
+ 
+ 	public void deleteById(Integer id) {
+ 	    CampAreaBean campArea = campAreaRepo.findById(id)
+ 	        .orElseThrow(() -> new RuntimeException("找不到營地"));
+ 
+ 	    // 多對多解除關聯
+ 	    if (campArea.getFacilities() != null) campArea.getFacilities().clear();
+ 	    if (campArea.getWifis() != null) campArea.getWifis().clear();
+ 	    if (campArea.getBathrooms() != null) campArea.getBathrooms().clear();
+ 	    if (campArea.getParkings() != null) campArea.getParkings().clear();
+ 	    if (campArea.getPetPolicies() != null) campArea.getPetPolicies().clear();
+ 	    if (campArea.getFeatures() != null) campArea.getFeatures().clear();
+ 
+ 	    // 一對多解除關聯
+ 	    if (campArea.getCampAreaImages() != null) {
+ 	        campArea.getCampAreaImages().forEach(img -> img.setCampArea(null));
+ 	        campArea.getCampAreaImages().clear();
+ 	    }
+ 
+ 	    if (campArea.getCampSites() != null) {
+ 	        campArea.getCampSites().forEach(site -> site.setCampArea(null));
+ 	        campArea.getCampSites().clear();
+ 	    }
+ 
+ 	    if (campArea.getOffWeekdays() != null) {
+ 	        campArea.getOffWeekdays().forEach(off -> off.setCampArea(null));
+ 	        campArea.getOffWeekdays().clear();
+ 	    }
+ 
+ 	    if (campArea.getOffDays() != null) {
+ 	        campArea.getOffDays().forEach(off -> off.setCampArea(null));
+ 	        campArea.getOffDays().clear();
+ 	    }
+ 
+ 	    campAreaRepo.delete(campArea); // 使用 delete 而非 deleteById
+ 	}
+ 
+ 
+ 	@Transactional
+ 	public boolean updateCampAreaStatus(Integer campAreaId, String newStatus, String username) {
+ 	    int rows = campAreaRepo.updateStatusByIdAndUsername(campAreaId, newStatus, username);
+ 	    return rows > 0;
+ 	}
+ 
+ 	public boolean existsCampArea(Integer id) {
+ 		if (id != null) {
+ 			return this.campAreaRepo.existsById(id);
+ 		}
+ 		return false;
+ 	}
+ 
+ 	public List<CampAreaSimpleDTO> find(String entity) {
+ 		JSONObject obj = new JSONObject(entity); // 把字串轉成 JSONObject
+ 		List<CampAreaBean> rawList = campAreaRepo.find(obj);
+ 
+ 		return rawList.stream().map(CampAreaSimpleDTO::new).toList();
+ 	}
+ 
+ 	public long count(String entity) {
+ 		JSONObject obj;
+ 
+ 		if (entity == null || entity.isBlank()) {
+ 			obj = new JSONObject();
+ 		} else {
+ 			obj = new JSONObject(entity);
+ 		}
+ 
+ 		return campAreaRepo.count(obj);
+ 	}
+ 
+ //	// == 從 Request 建立新的營區 ==
+ //	@Autowired
+ //	private ServletContext servletContext;
+ //
+ //	public CampAreaBean createCampAreaForUser(Integer userId, CampAreaRequest request, List<MultipartFile> images) {
+ //		System.err.println("--------------------------------createCampAreaForUser");
+ //	    // 找出使用者
+ //	    UserBean user = userRepo.findById(userId)
+ //	        .orElseThrow(() -> new RuntimeException("找不到使用者"));
+ //
+ //	    // 建立營區
+ //	    CampAreaBean entity = new CampAreaBean();
+ //	    fillEntityFromRequest(entity, request);
+ //	    entity.setUser(user);
+ //
+ //	    // 初始化圖片關聯列表
+ //	    List<CampAreaImageBean> imageBeans = new ArrayList<>();	    
+ //	    
+ //	    if (images != null && !images.isEmpty()) {
+ //	        try {
+ //	            // 使用 ServletContext 抓出實際 Tomcat 的 uploads 路徑
+ //	            String realUploadPath = servletContext.getRealPath("/uploads/img/campArea");
+ //	            System.out.println("realUploadPath="+realUploadPath);
+ //	            
+ //	            
+ //	            Path uploadDir = Paths.get(realUploadPath);
+ //	            Files.createDirectories(uploadDir); // 自動建立目錄
+ //	            System.out.println("圖片實際儲存路徑: " + realUploadPath);
+ //
+ //	            for (MultipartFile file : images) {
+ //	                if (!file.isEmpty()) {
+ //	                    String originalFilename = file.getOriginalFilename();
+ //	                    String ext = getFileExtension(originalFilename);
+ //	                    String filename = UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+ //	                    Path targetPath = uploadDir.resolve(filename);
+ //
+ //	                    Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+ //
+ //	                    // URL 存成相對路徑供前端存取
+ //	                    String url = "/static/" + uploadProps.getCampArea().replace("\\", "/") + "/" + filename;
+ //	                    System.out.println("成功寫入資料庫的url");
+ //
+ //	                    // 建立 CampAreaImageBean 並設定關聯
+ //	                    CampAreaImageBean image = new CampAreaImageBean();
+ //	                    image.setImageUrl(url);
+ //	                    image.setCampArea(entity); // 雙向關聯
+ //	                    imageBeans.add(image);
+ //	                }
+ //	            }
+ //
+ //	        } catch (IOException e) {
+ //	            throw new RuntimeException("圖片儲存失敗：" + e.getMessage(), e);
+ //	        } catch (java.io.IOException e) {
+ //				// TODO Auto-generated catch block
+ //				e.printStackTrace();
+ //			}
+ //	    }
+ //
+ //	    // 設定圖片關聯
+ //	    entity.setCampAreaImages(imageBeans);
+ //
+ //	    return campAreaRepo.save(entity);
+ //	}
+ 	
+ 	// == 從 Request 建立新的營區 ==
+ 	public CampAreaBean createCampAreaForUser(Integer userId, CampAreaRequest request, List<MultipartFile> images) {
+ 	    System.err.println("---------- createCampAreaForUser ----------");
+ 
+ 	    // 準備圖片 list（圖片轉 url）
+ 	    List<CampAreaImageBean> imageBeans = new ArrayList<>();
+ 	    if (images != null && !images.isEmpty()) {
+ 	        try {
+ 	            Path rootPath = Paths.get("").toAbsolutePath();
+ 	            Path uploadDir = rootPath.resolve("uploads/img/campArea");
+ 	            Files.createDirectories(uploadDir);
+ 
+ 	            for (MultipartFile file : images) {
+ 	                if (!file.isEmpty()) {
+ 	                    String originalFilename = file.getOriginalFilename();
+ 	                    String ext = getFileExtension(originalFilename);
+ 	                    String filename = UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+ 	                    Path targetPath = uploadDir.resolve(filename);
+ 
+ 	                    Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+ 
+ 	                    String url = "/static/uploads/img/campArea/" + filename;
+ 
+ 	                    CampAreaImageBean image = new CampAreaImageBean();
+ 	                    image.setImageUrl(url);
+ 	                    imageBeans.add(image);
+ 	                }
+ 	            }
+ 	        } catch (IOException e) {
+ 	            throw new RuntimeException("圖片儲存失敗：" + e.getMessage(), e);
+ 	        } catch (java.io.IOException e) {
+ 				// TODO Auto-generated catch block
+ 				e.printStackTrace();
+ 			}
+ 	    }
+ 
+ 	    // 建立空實體
+ 	    CampAreaBean entity = new CampAreaBean();
+ 
+ 	    // 把 request 填進 entity（包含 offDays、offWeekdays、圖片 URL 等）
+ 	    fillEntityFromRequest(entity, request);
+ 
+ 	    // 設定使用者（避免被覆蓋）
+ 	    UserBean user = userRepo.findById(userId)
+ 	        .orElseThrow(() -> new RuntimeException("找不到使用者"));
+ 	    entity.setUser(user);
+ 
+ 	    // 把圖片設進 entity 並加上反向關聯
+ 	    for (CampAreaImageBean img : imageBeans) {
+ 	        img.setCampArea(entity);
+ 	    }
+ 	    entity.setCampAreaImages(imageBeans);
+ 
+ 	    return campAreaRepo.save(entity);
+ 	}
+ 
+ 
+ 	private String getFileExtension(String filename) {
+ 	    if (filename == null || !filename.contains(".")) return "";
+ 	    return filename.substring(filename.lastIndexOf('.') + 1);
+ 	}
+ 
+ 
+ 
+ 
+ 
+ 	
+ 
+ 	// == 從 Request 更新既有營區 ==
+ 	public CampAreaBean updateFromRequest(Integer id, CampAreaRequest request, List<MultipartFile> images) {
+ 	    System.err.println("---------- updateCampAreaForUser ----------");
+ 	    CampAreaBean entity = campAreaRepo.findById(id)
+ 	            .orElseThrow(() -> new RuntimeException("找不到該營地 (id=" + id + ")"));
+ 
+ 	    fillEntityFromRequest(entity, request);
+ 	    updateManyToMany(entity, request);
+ 
+ 	 // 移除主圖
+ 	    if (request.isRemoveMainImage() && entity.getCampAreaImages() != null) {
+ 	        entity.getCampAreaImages().clear(); // 清空圖片清單
+ 	    }
+ 
+ 	    // 移除指定圖片
+ 	    if (request.getRemoveImageIds() != null && entity.getCampAreaImages() != null) {
+ 	        // 先過濾出要保留的圖片
+ 	        List<CampAreaImageBean> remaining = entity.getCampAreaImages().stream()
+ 	            .filter(img -> !request.getRemoveImageIds().contains(img.getImageId()))
+ 	            .collect(Collectors.toList());
+ 
+ 	        // 用 clear + addAll 而不是直接 set
+ 	        entity.getCampAreaImages().clear();
+ 	        entity.getCampAreaImages().addAll(remaining);
+ 
+ 	        imageRepo.deleteAllById(request.getRemoveImageIds());
+ 	    }
+ 
+ 
+ 	    // 新增圖片
+ 	    if (images != null && !images.isEmpty()) {
+ 	        String saveDir = Paths.get(new File("").getAbsolutePath(), uploadProps.getCampArea()).toString();
+ 	        for (MultipartFile file : images) {
+ 	            String filename = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+ 	            try {
+ 	                File destFile = new File(saveDir + File.separator + filename);
++                    String canonicalSaveDir = new File(saveDir).getCanonicalPath();
++                    String canonicalDestFile = destFile.getCanonicalPath();
++                    if (!canonicalDestFile.startsWith(canonicalSaveDir)) {
++                        throw new IOException("Invalid file path");
++                    }
++
+ 	                file.transferTo(destFile);
+ 
+ 	                CampAreaImageBean img = new CampAreaImageBean();
+ 	                img.setImageUrl("/static/" + uploadProps.getCampArea().replace("\\", "/") + "/" + filename);
+ 	                img.setCampArea(entity);
+ 	                entity.getCampAreaImages().add(img);
+ 	                System.out.println("收到圖片數量: " + (images != null ? images.size() : "null"));
+ 
+ 	            } catch (IOException | IllegalStateException e) {
+ 	                throw new RuntimeException("圖片儲存失敗: " + e.getMessage(), e);
+ 	            } catch (java.io.IOException e) {
+ 	                System.out.println("圖片存取失敗");
+ 	                e.printStackTrace();
+ 	            }
+ 	        }
+ 	    }
+ 
+ 	    return campAreaRepo.save(entity);
+ 	}
+ 
+ 
+     private void updateManyToMany(CampAreaBean entity, CampAreaRequest request) {
+         if (request.getWifiIds() != null) {
+             entity.setWifis(wifiRepo.findAllById(request.getWifiIds()));
+         }
+         if (request.getFeatureTagIds() != null) {
+             entity.setFeatures(featureTagRepo.findAllById(request.getFeatureTagIds()));
+         }
+         if (request.getParkingIds() != null) {
+             entity.setParkings(parkingRepo.findAllById(request.getParkingIds()));
+         }
+         if (request.getFacilityIds() != null) {
+             entity.setFacilities(facilityRepo.findAllById(request.getFacilityIds()));
+         }
+         if (request.getBathroomIds() != null) {
+             entity.setBathrooms(bathroomRepo.findAllById(request.getBathroomIds()));
+         }
+         if (request.getPetPolicyIds() != null) {
+             entity.setPetPolicies(petRepo.findAllById(request.getPetPolicyIds()));
+         }
+     }
+ 
+ 
+ 
+ 	// 把Request資料轉到Entity ==
+     private void fillEntityFromRequest(CampAreaBean entity, CampAreaRequest request) {
+ 
+         if (request.getUserId() != null) {
+             UserBean user = userRepo.findById(request.getUserId())
+                 .orElseThrow(() -> new RuntimeException("找不到User (id=" + request.getUserId() + ")"));
+             entity.setUser(user);
+         }
+ 
+         // ======= 基本欄位更新 =======
+         if (request.getCampAreaName() != null) entity.setCampAreaName(request.getCampAreaName());
+         if (request.getDescription() != null) entity.setDescription(request.getDescription());
+         if (request.getLocation() != null) entity.setLocation(request.getLocation());
+         if (request.getCoordinates() != null) entity.setCoordinates(request.getCoordinates());
+         if (request.getAddress() != null) entity.setAddress(request.getAddress());
+         if (request.getPhone() != null) entity.setPhone(request.getPhone());
+         if (request.getEmail() != null) entity.setEmail(request.getEmail());
+         if (request.getWebsiteUrl() != null) entity.setWebsiteUrl(request.getWebsiteUrl());
+         if (request.getNotice() != null) entity.setNotice(request.getNotice());
+         if (request.getTransportation() != null) entity.setTransportation(request.getTransportation());
+         if (request.getAltitude() != null) entity.setAltitude(request.getAltitude());
+         if (request.getToiletImage() != null) entity.setToiletImage(request.getToiletImage());
+ 
+         entity.setUpdatedDate(LocalDateTime.now());
+ 
+         // ======= 多對多關聯更新 =======
+         if (request.getFeatureTagIds() != null) {
+ 	        if (entity.getFeatures() == null) {
+ 	            entity.setFeatures(new ArrayList<>());
+ 	        }
+ 	        entity.getFeatures().clear();
+ 	        entity.getFeatures().addAll(featureTagRepo.findAllById(request.getFeatureTagIds()));
+ 	    }
+ 
+ 	    if (request.getFacilityIds() != null) {
+ 	        if (entity.getFacilities() == null) {
+ 	            entity.setFacilities(new ArrayList<>());
+ 	        }
+ 	        entity.getFacilities().clear();
+ 	        entity.getFacilities().addAll(facilityRepo.findAllById(request.getFacilityIds()));
+ 	    }
+ 
+ 	    if (request.getWifiIds() != null) {
+ 	        if (entity.getWifis() == null) {
+ 	            entity.setWifis(new ArrayList<>());
+ 	        }
+ 	        entity.getWifis().clear();
+ 	        entity.getWifis().addAll(wifiRepo.findAllById(request.getWifiIds()));
+ 	    }
+ 
+ 	    if (request.getBathroomIds() != null) {
+ 	        if (entity.getBathrooms() == null) {
+ 	            entity.setBathrooms(new ArrayList<>());
+ 	        }
+ 	        entity.getBathrooms().clear();
+ 	        entity.getBathrooms().addAll(bathroomRepo.findAllById(request.getBathroomIds()));
+ 	    }
+ 
+ 	    if (request.getParkingIds() != null) {
+ 	        if (entity.getParkings() == null) {
+ 	            entity.setParkings(new ArrayList<>());
+ 	        }
+ 	        entity.getParkings().clear();
+ 	        entity.getParkings().addAll(parkingRepo.findAllById(request.getParkingIds()));
+ 	    }
+ 
+ 	    if (request.getPetPolicyIds() != null) {
+ 	        if (entity.getPetPolicies() == null) {
+ 	            entity.setPetPolicies(new ArrayList<>());
+ 	        }
+ 	        entity.getPetPolicies().clear();
+ 	        entity.getPetPolicies().addAll(petRepo.findAllById(request.getPetPolicyIds()));
+ 	    }
+ 
+         // ======= 圖片 URL 更新（非檔案）=======
+ 	    if (request.getMainImageUrls() != null) {
+ 	        if (entity.getCampAreaImages() == null) {
+ 	            entity.setCampAreaImages(new ArrayList<>());
+ 	        }
+ 	        entity.getCampAreaImages().clear();
+ 
+ 	        List<CampAreaImageBean> newImages = request.getMainImageUrls().stream()
+ 	            .map(url -> {
+ 	                CampAreaImageBean img = new CampAreaImageBean();
+ 	                img.setImageUrl(url);
+ 	                img.setCampArea(entity); // 建立反向關聯
+ 	                return img;
+ 	            }).toList();
+ 
+ 	        entity.getCampAreaImages().addAll(newImages);
+ 	    }
+ 
+ 	 // ======= 固定休假星期更新 =======
+ 	    if (request.getOffWeekdays() != null) {
+ 	        if (entity.getOffWeekdays() == null) {
+ 	            entity.setOffWeekdays(new ArrayList<>());
+ 	        } else {
+ 	            entity.getOffWeekdays().clear();
+ 	        }
+ 
+ 	        for (Integer day : request.getOffWeekdays()) {
+ 	            CampAreaOffWeekdayBean off = new CampAreaOffWeekdayBean();
+ 	            off.setCampArea(entity);
+ 	            off.setWeekday(day);
+ 	            entity.getOffWeekdays().add(off);
+ 	        }
+ 	    }
+ 
+ 	    // ======= 特定休假日更新 =======
+ 	    if (request.getOffDates() != null) {
+ 	        if (entity.getOffDays() == null) {
+ 	            entity.setOffDays(new ArrayList<>());
+ 	        } else {
+ 	            entity.getOffDays().clear();
+ 	        }
+ 
+ 	        for (LocalDate date : request.getOffDates()) {
+ 	            CampAreaOffDayBean off = new CampAreaOffDayBean();
+ 	            off.setCampArea(entity);
+ 	            off.setOffDate(date);
+ 	            entity.getOffDays().add(off);
+ 	        }
+ 	    }
+ 
+     }
+ 
+ 	
+ 	
+ 	
+ 	
+ 	
+ 	public List<CampAreaBean> findByUserIdWithSites(Integer userId) {
+ 	    return campAreaRepo.findByUserIdWithSites(userId);
+ 	}
+ 
+ 
+ 
+ }
